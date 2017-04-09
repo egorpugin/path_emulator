@@ -7,5 +7,5 @@ Simple PATH emulator for Windows.
 Download cppan client from https://cppan.org/
 
 ```
-cppan --build path.exe
+cppan --build path.cpp
 ```
