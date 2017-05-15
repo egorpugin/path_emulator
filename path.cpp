@@ -126,7 +126,8 @@ try
                 "/TP",
                 "/DUNICODE",
                 "/DPROG=LR\"myfile(" + boost::replace_all_copy(p.parent_path().string(), "/", "\\") + "\\" +
-                p.filename().string() + ")myfile\""
+                p.filename().string() + ")myfile\"",
+                "/DPROG_NAME=LR\"myfile(" + p.filename().string() + ")myfile\"",
             });
         });
     }

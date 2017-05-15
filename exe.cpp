@@ -5,7 +5,7 @@
 #error PROG is undefined
 #endif
 
-#define MESSAGE(m) MessageBox(NULL, m, L"Exe trampoline: __fn__", MB_OK)
+#define MESSAGE(m) MessageBox(NULL, m, L"Exe trampoline: " PROG_NAME, MB_OK)
 
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "user32.lib")
