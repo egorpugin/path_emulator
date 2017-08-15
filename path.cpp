@@ -4,6 +4,7 @@ local_settings:
     use_shared_libs: false
     build:
         cxx_flags_release: /MT
+        cxx_flags: /std:c++17
 dependencies:
     - pvt.egorpugin.primitives.command: master
     - pvt.egorpugin.primitives.executor: master
@@ -22,13 +23,13 @@ dependencies:
 #include <regex>
 #include <set>
 
-const String cl = "cl";
+const String cl = "cl.exe";
 const path dst = "links";
 
 int main()
 try
 {
-    if (!resolve_executable(cl))
+    if (primitives::resolve_executable(cl).empty())
         throw std::runtime_error("Please, run vcvars(32|64|all).bat file from VS installation");
 
     const auto obj = fs::temp_directory_path() / "path" / "obj";
@@ -115,8 +116,8 @@ try
                 return;
             }
 
-            command::execute({
-                "cl",
+            primitives::Command::execute({
+                "cl.exe",
                 "exe.cpp",
                 "/Fo" + (obj / name).string(),
                 "/Fe" + o.string(),
