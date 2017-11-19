@@ -4,7 +4,7 @@ local_settings:
     use_shared_libs: false
     build:
         cxx_flags_release: /MT
-        cxx_flags: /std:c++17
+c++: 17
 dependencies:
     - pvt.egorpugin.primitives.command: master
     - pvt.egorpugin.primitives.executor: master
@@ -112,7 +112,7 @@ try
 
             if (p.extension() == ".bat")
             {
-                write_file(o, "@echo off\n\"" + p.string() + "\" %*");
+                write_file(o, "@echo off\npushd .\n\"" + p.string() + "\" %*\npopd\n");
                 return;
             }
 
