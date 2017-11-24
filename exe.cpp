@@ -26,7 +26,7 @@ int wmain(int argc, wchar_t *argv[])
 
     STARTUPINFO si = { 0 };
     PROCESS_INFORMATION pi = { 0 };
-    if (!CreateProcess(PROG, &cmd[0], 0, 0, 0, 0, 0, 0, &si, &pi))
+    if (!CreateProcess(PROG, &cmd[0], 0, 0, TRUE, 0, 0, 0, &si, &pi))
     {
         auto e = GetLastError();
         WCHAR lpszBuffer[8192] = { 0 };
