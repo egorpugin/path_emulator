@@ -112,7 +112,7 @@ try
 
             if (p.extension() == ".bat")
             {
-                write_file(o, "@echo off\npushd .\n\"" + p.string() + "\" %*\npopd\n");
+                write_file(o, "@echo off\npushd .\ncall \"" + p.string() + "\" %*\npopd\n");
                 return;
             }
 
