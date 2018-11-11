@@ -119,7 +119,11 @@ try
 
         for (auto &file : boost::make_iterator_range(fs::directory_iterator(p), {}))
         {
-            if (!fs::is_regular_file(file) || (file.path().extension() != ".exe" && file.path().extension() != ".bat"))
+            if (!fs::is_regular_file(file) ||
+                (file.path().extension() != ".exe" &&
+                file.path().extension() != ".bat" &&
+                file.path().extension() != ".cmd"
+                ))
                 continue;
             files.emplace(file.path(), file.path().filename());
         }
@@ -170,7 +174,7 @@ try
     get_map_and_iterate(root, "files", [&files](auto v)
     {
         path p = v.first.as<String>();
-        for (auto &e : v.second)
+        for (const auto &e : v.second)
         {
             if (e.IsScalar())
                 files.emplace(p / e.as<String>(), e.as<String>());
@@ -190,7 +194,7 @@ try
             if (fs::exists(o))
                 return;
 
-            if (p.extension() == ".bat")
+            if (p.extension() == ".bat" || p.extension() == ".cmd")
             {
                 write_file(o, "@echo off\npushd .\ncall \"" + p.string() + "\" %*\npopd\n");
                 return;

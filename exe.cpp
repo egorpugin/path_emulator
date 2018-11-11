@@ -51,6 +51,11 @@ int main()
     LocalFree(argv);
 
     STARTUPINFO si = { 0 };
+    si.cb = sizeof(si);
+    si.dwFlags |= STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION pi = { 0 };
     if (!CreateProcess(PROG, &cmd[0], 0, 0, TRUE, 0, 0, 0, &si, &pi))
     {
@@ -66,7 +71,11 @@ int main()
 
     DWORD r;
     if (GetExitCodeProcess(pi.hProcess, &r))
+    {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
         return r;
+    }
 
     MESSAGE(L"Cannot get exit code!");
     return 1;
