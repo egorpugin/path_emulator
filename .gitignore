@@ -1,4 +1,8 @@
 *.lnk
 *.exe
 *.yml
+*.bat
+
+.sw
+bin
 links

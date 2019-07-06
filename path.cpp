@@ -1,4 +1,27 @@
 /*
+local_settings:
+    output_dir: .
+    use_shared_libs: false
+    build:
+        cxx_flags_release: /MT
+c++: 17
+files: path.cpp
+options:
+    any:
+        definitions:
+            win32:
+                public:
+                    - UNICODE
+dependencies:
+    - pub.egorpugin.primitives.command: master
+    - pub.egorpugin.primitives.executor: master
+    - pub.egorpugin.primitives.filesystem: master
+    - pub.egorpugin.primitives.log: master
+    - pub.egorpugin.primitives.yaml: master
+    - pub.egorpugin.primitives.sw.main: master
+*/
+
+/*
  * Copyright (C) 2016-2018, Egor Pugin
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,38 +37,21 @@
  * limitations under the License.
  */
 
-/*
-local_settings:
-    output_dir: .
-    use_shared_libs: false
-    build:
-        cxx_flags_release: /MT
-c++: 17
-options:
-    any:
-        definitions:
-            win32:
-                public:
-                    - UNICODE
-dependencies:
-    - pvt.egorpugin.primitives.command: master
-    - pvt.egorpugin.primitives.executor: master
-    - pvt.egorpugin.primitives.filesystem: master
-    - pvt.egorpugin.primitives.yaml: master
-*/
-
 #include <primitives/command.h>
 #include <primitives/executor.h>
 #include <primitives/filesystem.h>
 #include <primitives/yaml.h>
+#include <primitives/sw/main.h>
 
 #include <boost/algorithm/string.hpp>
 
 #include <iostream>
 #include <regex>
-#include <set>
 
 #include <Windows.h>
+
+#include <primitives/log.h>
+DECLARE_STATIC_LOGGER(logger, "path");
 
 const String cl = "cl.exe";
 const path dst = "links";
@@ -88,8 +94,7 @@ short DumpFile(LPCTSTR filename)
     return ss;
 }
 
-int main()
-try
+int main(int argc, char **argv)
 {
     if (primitives::resolve_executable(cl).empty())
         throw std::runtime_error("Please, run vcvars(32|64|all).bat file from VS installation");
@@ -185,7 +190,6 @@ try
 
     Executor e("Proxy creator");
     std::vector<Future<void>> futures;
-    futures.reserve(files.size());
     for (auto &f : files)
     {
         futures.push_back(e.push([&obj, p = f.first, name = f.second]
@@ -205,53 +209,41 @@ try
             Strings args{
                 cl,
                 exe.string(),
-                "/Fo" + (obj / name).string(),
-                "/Fe" + o.string(),
+                "/Fo" + normalize_path(obj / name),
+                "/Fe" + normalize_path(fs::current_path() / o),
                 "/nologo",
                 "/EHsc",
+
+#ifndef NDEBUG
+                "/Od",
+                "/Zi",
+                "/DDEBUG_EXE",
+#else
                 "/O2",
-                "/TP",
+#endif
+
                 "/DUNICODE",
                 "/DCONSOLE="s + (ss == IMAGE_SUBSYSTEM_WINDOWS_GUI ? "0" : "1"),
-                "/DPROG=LR\"myfile(" + boost::replace_all_copy(p.parent_path().string(), "/", "\\") + "\\" + p.filename().string() + ")myfile\"",
-                "/DPROG_NAME=LR\"myfile(" + p.filename().string() + ")myfile\"",
+                "/DPROG=LR\"myfile(" + boost::replace_all_copy(normalize_path(p.parent_path()), "/", "\\") + "\\" + normalize_path(p.filename()) + ")myfile\"",
+                "/DPROG_NAME=LR\"myfile(" + normalize_path(p.filename()) + ")myfile\"",
             };
 
             args.push_back("-link");
+
+#ifndef NDEBUG
+            args.push_back("-debug:full");
+#endif
+
             args.push_back("Shell32.lib");
             if (ss == IMAGE_SUBSYSTEM_WINDOWS_GUI)
                 args.push_back("/SUBSYSTEM:WINDOWS");
 
-            static std::mutex m;
-            {
-                //std::unique_lock<std::mutex> lk(m);
-                //std::cout << "building " << o << " from " << p << "\n";
-            }
-
             primitives::Command c;
-            c.args = args;
-            std::error_code ec;
-            c.execute(ec);
-            if (ec)
-            {
-                std::unique_lock<std::mutex> lk(m);
-                std::cout << "building " << o << " from " << p << "\n";
-                std::cout << c.out.text << "\n";
-                std::cout << c.err.text << "\n";
-            }
+            c.setArguments(args);
+            c.execute();
         }));
     }
     waitAndGet(futures);
 
     return 0;
-}
-catch (const std::exception &e)
-{
-    std::cerr << e.what() << "\n";
-    return 1;
-}
-catch (...)
-{
-    std::cerr << "Unhandled unknown exception" << "\n";
-    return 1;
 }

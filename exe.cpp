@@ -26,13 +26,20 @@
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "user32.lib")
 
+int
 #if defined(CONSOLE) && CONSOLE == 0
-int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
-{
+WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine, int nCmdShow)
 #else
-int main()
-{
+main()
 #endif
+{
+    std::wstring cmd = GetCommandLine();
+
+#ifdef DEBUG_EXE
+    //MESSAGE((L"Command line: " + cmd).c_str());
+    //DebugBreak();
+#endif
+
     WIN32_FIND_DATA FindFileData;
     auto hFind = FindFirstFile(PROG, &FindFileData);
     if (hFind == INVALID_HANDLE_VALUE)
@@ -41,7 +48,6 @@ int main()
         return 1;
     }
 
-    std::wstring cmd = GetCommandLine();
     int argc;
     auto argv = CommandLineToArgvW(cmd.c_str(), &argc);
 
@@ -52,12 +58,20 @@ int main()
 
     STARTUPINFO si = { 0 };
     si.cb = sizeof(si);
+    si.dwFlags |= STARTF_USESHOWWINDOW;
+    si.wShowWindow = nCmdShow;
     si.dwFlags |= STARTF_USESTDHANDLES;
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION pi = { 0 };
-    if (!CreateProcess(PROG, &cmd[0], 0, 0, TRUE, 0, 0, 0, &si, &pi))
+    if (!CreateProcess(
+        PROG, &cmd[0],
+        0, 0,
+        TRUE,
+        0,
+        0, 0,
+        &si, &pi))
     {
         auto e = GetLastError();
         WCHAR lpszBuffer[8192] = { 0 };
