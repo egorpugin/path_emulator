@@ -59,7 +59,9 @@ main()
     STARTUPINFO si = { 0 };
     si.cb = sizeof(si);
     si.dwFlags |= STARTF_USESHOWWINDOW;
+#if defined(CONSOLE) && CONSOLE == 0
     si.wShowWindow = nCmdShow;
+#endif
     si.dwFlags |= STARTF_USESTDHANDLES;
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);

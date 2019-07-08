@@ -239,6 +239,9 @@ int main(int argc, char **argv)
                 args.push_back("/SUBSYSTEM:WINDOWS");
 
             primitives::Command c;
+#ifndef NDEBUG
+            c.inherit = true;
+#endif
             c.setArguments(args);
             c.execute();
         }));
