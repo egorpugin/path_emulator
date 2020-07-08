@@ -53,11 +53,7 @@ dependencies:
 #include <primitives/log.h>
 DECLARE_STATIC_LOGGER(logger, "path");
 
-const String cl = "cl.exe";
-const path dst = "links";
-const path exe = "exe.cpp";
-
-short DumpFile(LPCTSTR filename)
+WORD get_file_subsystem(LPCTSTR filename)
 {
     auto hFile = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (hFile == INVALID_HANDLE_VALUE)
@@ -94,17 +90,103 @@ short DumpFile(LPCTSTR filename)
     return ss;
 }
 
+void remove_old_files(const FilesMap &files, const path &dir)
+{
+    // get new files
+    Files dstfiles;
+    for (auto &[k, v] : files)
+        dstfiles.insert(v);
+
+    // get existing links
+    auto existing_files = enumerate_files(dir);
+    for (auto &f : existing_files)
+    {
+        if (dstfiles.find(f.filename()) == dstfiles.end())
+        {
+            std::cout << "Removing old file: " << f << "\n";
+            fs::remove(f);
+        }
+    }
+}
+
+void create_links(const FilesMap &files, const path &dstdir, const path &compiler, const path &exe_source_fn)
+{
+    const auto obj = fs::temp_directory_path() / "path" / "obj";
+    fs::create_directories(obj);
+
+    Executor e("Proxy creator");
+    std::vector<Future<void>> futures;
+    for (auto &f : files)
+    {
+        futures.push_back(e.push([&obj, &dstdir, &compiler, &exe_source_fn, p = f.first, name = f.second]
+        {
+            auto o = dstdir / name;
+            if (fs::exists(o))
+                return;
+
+            if (p.extension() == ".bat" || p.extension() == ".cmd")
+            {
+                write_file(o, "@echo off\npushd .\ncall \"" + p.string() + "\" %*\npopd\n");
+                return;
+            }
+
+            auto ss = get_file_subsystem(wnormalize_path(p).c_str());
+
+            Strings args
+            {
+                compiler.u8string(),
+                exe_source_fn.u8string(),
+                "/Fo" + normalize_path(obj / name),
+                "/Fe" + normalize_path(fs::current_path() / o),
+                "/nologo",
+                "/EHsc",
+
+    #ifndef NDEBUG
+                "/Od",
+                "/Zi",
+                "/DDEBUG_EXE",
+    #else
+                "/O2",
+    #endif
+
+                "/DUNICODE",
+                "/DCONSOLE="s + (ss == IMAGE_SUBSYSTEM_WINDOWS_GUI ? "0" : "1"),
+                "/DPROG=LR\"myfile(" + boost::replace_all_copy(normalize_path(p.parent_path()), "/", "\\") + "\\" + normalize_path(p.filename()) + ")myfile\"",
+                "/DPROG_NAME=LR\"myfile(" + normalize_path(p.filename()) + ")myfile\"",
+            };
+
+            args.push_back("-link");
+
+    #ifndef NDEBUG
+            args.push_back("-debug:full");
+    #endif
+
+            args.push_back("Shell32.lib");
+            if (ss == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+                args.push_back("/SUBSYSTEM:WINDOWS");
+
+            primitives::Command c;
+    #ifndef NDEBUG
+            c.inherit = true;
+    #endif
+            c.setArguments(args);
+            c.execute();
+        }));
+    }
+    waitAndGet(futures);
+}
+
 int main(int argc, char **argv)
 {
+    const String cl = "cl.exe";
+    const path exe = "exe.cpp";
+
     if (primitives::resolve_executable(cl).empty())
         throw std::runtime_error("Please, run vcvars(32|64|all).bat file from VS installation");
     if (!fs::exists(exe))
         throw std::runtime_error("exe.cpp was not found");
 
-    const auto obj = fs::temp_directory_path() / "path" / "obj";
-    fs::create_directories(obj);
-    fs::create_directories(dst);
-    std::map<path, path> files;
+    FilesMap files;
 
     //
     auto root = YAML::LoadFile("path.yml");
@@ -188,65 +270,10 @@ int main(int argc, char **argv)
         }
     });
 
-    Executor e("Proxy creator");
-    std::vector<Future<void>> futures;
-    for (auto &f : files)
-    {
-        futures.push_back(e.push([&obj, p = f.first, name = f.second]
-        {
-            auto o = dst / name;
-            if (fs::exists(o))
-                return;
-
-            if (p.extension() == ".bat" || p.extension() == ".cmd")
-            {
-                write_file(o, "@echo off\npushd .\ncall \"" + p.string() + "\" %*\npopd\n");
-                return;
-            }
-
-            auto ss = DumpFile(wnormalize_path(p).c_str());
-
-            Strings args{
-                cl,
-                exe.string(),
-                "/Fo" + normalize_path(obj / name),
-                "/Fe" + normalize_path(fs::current_path() / o),
-                "/nologo",
-                "/EHsc",
-
-#ifndef NDEBUG
-                "/Od",
-                "/Zi",
-                "/DDEBUG_EXE",
-#else
-                "/O2",
-#endif
-
-                "/DUNICODE",
-                "/DCONSOLE="s + (ss == IMAGE_SUBSYSTEM_WINDOWS_GUI ? "0" : "1"),
-                "/DPROG=LR\"myfile(" + boost::replace_all_copy(normalize_path(p.parent_path()), "/", "\\") + "\\" + normalize_path(p.filename()) + ")myfile\"",
-                "/DPROG_NAME=LR\"myfile(" + normalize_path(p.filename()) + ")myfile\"",
-            };
-
-            args.push_back("-link");
-
-#ifndef NDEBUG
-            args.push_back("-debug:full");
-#endif
-
-            args.push_back("Shell32.lib");
-            if (ss == IMAGE_SUBSYSTEM_WINDOWS_GUI)
-                args.push_back("/SUBSYSTEM:WINDOWS");
-
-            primitives::Command c;
-#ifndef NDEBUG
-            c.inherit = true;
-#endif
-            c.setArguments(args);
-            c.execute();
-        }));
-    }
-    waitAndGet(futures);
+    const path dst = "links";
+    fs::create_directories(dst);
+    remove_old_files(files, dst);
+    create_links(files, dst, cl, exe);
 
     return 0;
 }
