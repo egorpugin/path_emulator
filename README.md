@@ -4,8 +4,8 @@ Simple PATH emulator for Windows.
 
 # Build
 
-Download cppan client from https://cppan.org/
+Download sw client from https://software-network.org/
 
 ```
-cppan --build path.cpp
+sw build path.cpp
 ```
