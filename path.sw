@@ -1,57 +1,26 @@
-/*
-local_settings:
-    output_dir: .
-    use_shared_libs: false
-    build:
-        cxx_flags_release: /MT
-c++: 17
-files: path.cpp
-options:
-    any:
-        definitions:
-            win32:
-                public:
-                    - UNICODE
-dependencies:
-    - pub.egorpugin.primitives.command: master
-    - pub.egorpugin.primitives.executor: master
-    - pub.egorpugin.primitives.filesystem: master
-    - pub.egorpugin.primitives.log: master
-    - pub.egorpugin.primitives.yaml: master
-    - pub.egorpugin.primitives.sw.main: master
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2016-2024 Egor Pugin <egor.pugin@gmail.com>
 
 /*
- * Copyright (C) 2016-2018, Egor Pugin
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+c++: 23
+package_definitions: true
+dependencies:
+    - pub.egorpugin.primitives.command
+    - pub.egorpugin.primitives.executor
+    - pub.egorpugin.primitives.filesystem
+    - pub.egorpugin.primitives.sw.main
+    - pub.egorpugin.primitives.win32helpers
+*/
 
 #include <primitives/command.h>
 #include <primitives/executor.h>
 #include <primitives/filesystem.h>
-#include <primitives/yaml.h>
+#include <primitives/win32helpers.h>
 #include <primitives/sw/main.h>
-
 #include <boost/algorithm/string.hpp>
 
 #include <iostream>
 #include <regex>
-
-#include <Windows.h>
-
-#include <primitives/log.h>
-DECLARE_STATIC_LOGGER(logger, "path");
 
 WORD get_file_subsystem(LPCTSTR filename)
 {
@@ -109,7 +78,7 @@ void remove_old_files(const FilesMap &files, const path &dir)
     }
 }
 
-void create_links(const FilesMap &files, const path &dstdir, const path &compiler, const path &exe_source_fn)
+void create_links(const FilesMap &files, const path &dstdir, const auto &compiler, const path &exe_source_fn)
 {
     const auto obj = fs::temp_directory_path() / "path" / "obj";
     fs::create_directories(obj);
@@ -130,16 +99,18 @@ void create_links(const FilesMap &files, const path &dstdir, const path &compile
                 return;
             }
 
-            auto ss = get_file_subsystem(wnormalize_path(p).c_str());
+            auto ss = get_file_subsystem(normalize_path(p).c_str());
 
             Strings args
             {
-                compiler.u8string(),
-                exe_source_fn.u8string(),
-                "/Fo" + normalize_path(obj / name),
-                "/Fe" + normalize_path(fs::current_path() / o),
+                compiler.cl.string(),
+                exe_source_fn.string(),
+                "/Fo" + normalize_path(obj / name).string(),
+                "/Fe" + normalize_path(fs::current_path() / o).string(),
                 "/nologo",
                 "/EHsc",
+                // share pdb
+                "/FS",
 
     #ifndef NDEBUG
                 "/Od",
@@ -151,11 +122,19 @@ void create_links(const FilesMap &files, const path &dstdir, const path &compile
 
                 "/DUNICODE",
                 "/DCONSOLE="s + (ss == IMAGE_SUBSYSTEM_WINDOWS_GUI ? "0" : "1"),
-                "/DPROG=LR\"myfile(" + boost::replace_all_copy(normalize_path(p.parent_path()), "/", "\\") + "\\" + normalize_path(p.filename()) + ")myfile\"",
-                "/DPROG_NAME=LR\"myfile(" + normalize_path(p.filename()) + ")myfile\"",
+                "/DPROG=LR\"myfile(" + boost::replace_all_copy(normalize_path(p.parent_path()).string(), "/", "\\") + "\\" + normalize_path(p.filename()).string() + ")myfile\"",
+                "/DPROG_NAME=LR\"myfile(" + normalize_path(p.filename()).string() + ")myfile\"",
             };
 
+            for (auto &&i : compiler.idirs) {
+                args.push_back("-I"s + i.string());
+            }
+
             args.push_back("-link");
+
+            for (auto &&i : compiler.ldirs) {
+                args.push_back("-LIBPATH:"s + i.string());
+            }
 
     #ifndef NDEBUG
             args.push_back("-debug:full");
@@ -166,6 +145,8 @@ void create_links(const FilesMap &files, const path &dstdir, const path &compile
                 args.push_back("/SUBSYSTEM:WINDOWS");
 
             primitives::Command c;
+            // so created pdf in debug mode will be created in that dir
+            c.working_directory = dstdir;
     #ifndef NDEBUG
             c.inherit = true;
     #endif
@@ -176,103 +157,144 @@ void create_links(const FilesMap &files, const path &dstdir, const path &compile
     waitAndGet(futures);
 }
 
-int main(int argc, char **argv)
-{
-    const String cl = "cl.exe";
-    const path exe = "exe.cpp";
+struct cl_desc {
+    path cl;
+    std::vector<path> idirs;
+    std::vector<path> ldirs;
+};
 
-    if (primitives::resolve_executable(cl).empty())
-        throw std::runtime_error("Please, run vcvars(32|64|all).bat file from VS installation");
+cl_desc find_cl_exe() {
+    auto insts = EnumerateVSInstances();
+    for (auto &&i : insts) {
+        if (i.VSInstallLocation.contains(L"Preview")) {
+            continue;
+        }
+        path p = i.VSInstallLocation;
+        p = p / "VC" / "Tools" / "MSVC";
+        for (auto &&d : fs::directory_iterator{p}) {
+            if (!fs::is_directory(d)) {
+                continue;
+            }
+            auto p2 = p / d.path() / "bin";
+            cl_desc c;
+            auto check_and_ret = [&](auto &&in) {
+                if (fs::exists(in)) {
+                    c.cl = in;
+                    c.idirs.push_back(p / d.path() / "include");
+                    path kit;
+                    {
+                        path kitsdir = "C:\\Program Files (x86)\\Windows Kits\\10\\include";
+                        std::set<path> kits;
+                        for (auto &&d : fs::directory_iterator{kitsdir}) {
+                            if (!fs::is_directory(d) || !isdigit(d.path().filename().string()[0])) {
+                                continue;
+                            }
+                            kits.insert(d.path().filename());
+                        }
+                        kit = *kits.rbegin();
+                        c.idirs.push_back(kitsdir / kit / "ucrt");
+                        c.idirs.push_back(kitsdir / kit / "um");
+                        c.idirs.push_back(kitsdir / kit / "shared");
+                    }
+                    c.ldirs.push_back(p / d.path() / "lib" / "x64");
+                    {
+                        path kitsdir = "C:\\Program Files (x86)\\Windows Kits\\10\\lib";
+                        c.ldirs.push_back(kitsdir / kit / "ucrt" / "x64");
+                        c.ldirs.push_back(kitsdir / kit / "um" / "x64");
+                    }
+                    return true;
+                }
+                return false;
+            };
+            if (false
+                || check_and_ret(p2 / "Hostx64" / "x64" / "cl.exe")
+                //|| check_and_ret(p2 / "Hostx86" / "x64" / "cl.exe")
+                //|| check_and_ret(p2 / "Hostx64" / "x86" / "cl.exe")
+                //|| check_and_ret(p2 / "Hostx86" / "x86" / "cl.exe")
+            ) {
+                return c;
+            }
+        }
+    }
+    return {};
+}
+
+struct data {
+    // grab all *.exe, *.bat, *.cmd
+    std::vector<std::string> all;
+    // grab all files by regex
+    std::vector<std::pair<std::string, std::string>> regex;
+    // grab selected files and optional alias=new name
+    std::map<std::string, std::map<std::string, std::string>> files;
+
+    bool empty() const {
+        return all.empty() && regex.empty() && files.empty();
+    }
+} root
+// rename to data.h?
+#if __has_include("path.h")
+= {
+#include "path.h"
+}
+#endif
+;
+
+int main(int argc, char *argv[]) {
+    const auto cl = find_cl_exe();
+    const path exe = fs::absolute("exe.cpp");
+
+    if (cl.cl.empty())
+        throw std::runtime_error("Visual Studio compiler (cl.exe) was not found");
     if (!fs::exists(exe))
         throw std::runtime_error("exe.cpp was not found");
 
+    // <existing file path, alias filename>
     FilesMap files;
 
     //
-    auto root = YAML::LoadFile("path.yml");
-
-    // 1. all .exe and .bat files, example:
-    /*
-    all:
-        - "c:/miktex/texmfs/install/miktex/bin/"
-    */
-    for (auto &p : get_sequence_set<path, String>(root, "all"))
-    {
-        if (!fs::exists(p))
-        {
+    for (auto &p : root.all) {
+        if (!fs::exists(p)) {
             std::cout << p << " does not exist\n";
             continue;
         }
-
-        for (auto &file : boost::make_iterator_range(fs::directory_iterator(p), {}))
-        {
-            if (!fs::is_regular_file(file) ||
-                (file.path().extension() != ".exe" &&
-                file.path().extension() != ".bat" &&
-                file.path().extension() != ".cmd"
-                ))
+        for (auto &file : fs::directory_iterator{p}) {
+            if (!fs::is_regular_file(file) || (file.path().extension() != ".exe" && file.path().extension() != ".bat" &&
+                                               file.path().extension() != ".cmd")) {
+                continue;
+            }
+            files.emplace(file.path(), file.path().filename());
+        }
+    }
+    for (auto &re : root.regex) {
+        auto &&p = re.first;
+        if (!fs::exists(p)) {
+            std::cout << p << " does not exist\n";
+            continue;
+        }
+        std::regex r{re.second};
+        for (auto &file : fs::directory_iterator{p}) {
+            if (!fs::is_regular_file(file))
+                continue;
+            if (!std::regex_match(file.path().string(), r))
                 continue;
             files.emplace(file.path(), file.path().filename());
         }
     }
-
-    // 2. regex, example:
-    /*
-    regex:
-        "c:/Program Files (x86)/Microsoft Visual Studio/2017/Community/VC/Auxiliary/Build":
-            - .*\.bat$
-    */
-    std::map<path, std::map<String, std::regex>> regex;
-    get_map_and_iterate(root, "regex", [&regex](auto v)
-    {
-        auto re = get_sequence_set<String>(v.second);
-        for (auto &r : re)
-            regex[v.first.as<String>()].emplace(r, r);
-    });
-    for (auto &re : regex)
-    {
-        auto &p = re.first;
-        if (!fs::exists(p))
-        {
-            std::cout << p << " does not exist\n";
-            continue;
-        }
-
-        for (auto &file : boost::make_iterator_range(fs::directory_iterator(p), {}))
-        {
-            if (!fs::is_regular_file(file))
-                continue;
-            for (auto &r : re.second)
-            {
-                if (!std::regex_match(file.path().string(), r.second))
-                    continue;
-                files.emplace(file.path(), file.path().filename());
-                break;
-            }
+    for (auto &&[pp, kv] : root.files) {
+        path p = pp;
+        for (auto &&[fn, alias] : kv) {
+            if (alias.empty())
+                files.emplace(p / fn, fn);
+            else
+                files.emplace(p / fn, alias);
         }
     }
 
-    // 3. files, example:
-    /*
-    files:
-        "c:/Program Files/PostgreSQL/10/bin/":
-            - psql.exe
-    */
-    get_map_and_iterate(root, "files", [&files](auto v)
-    {
-        path p = v.first.as<String>();
-        for (const auto &e : v.second)
-        {
-            if (e.IsScalar())
-                files.emplace(p / e.as<String>(), e.as<String>());
-            else if (e.IsMap())
-                files.emplace(p / e.begin()->first.as<String>(), e.begin()->second.as<String>());
-        }
-    });
-
     const path dst = "links";
     fs::create_directories(dst);
-    remove_old_files(files, dst);
+    if (!root.empty()) {
+        remove_old_files(files, dst);
+    }
     create_links(files, dst, cl, exe);
 
     return 0;
