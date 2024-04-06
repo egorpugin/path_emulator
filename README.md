@@ -7,5 +7,5 @@ Simple PATH emulator for Windows.
 Download sw client from https://software-network.org/
 
 ```
-sw build path.cpp
+sw build path.sw
 ```

@@ -22,6 +22,8 @@ dependencies:
 #include <iostream>
 #include <regex>
 
+// NOTE: we may want to create .com files in some cases?
+
 WORD get_file_subsystem(LPCTSTR filename)
 {
     auto hFile = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
@@ -59,7 +61,7 @@ WORD get_file_subsystem(LPCTSTR filename)
     return ss;
 }
 
-void remove_old_files(const FilesMap &files, const path &dir)
+void remove_old_files(auto &&files, const path &dir)
 {
     // get new files
     Files dstfiles;
@@ -78,7 +80,7 @@ void remove_old_files(const FilesMap &files, const path &dir)
     }
 }
 
-void create_links(const FilesMap &files, const path &dstdir, const auto &compiler, const path &exe_source_fn)
+void create_links(auto &&files, const path &dstdir, const auto &compiler, const path &exe_source_fn)
 {
     const auto obj = fs::temp_directory_path() / "path" / "obj";
     fs::create_directories(obj);
@@ -225,7 +227,7 @@ struct data {
     // grab all files by regex
     std::vector<std::pair<std::string, std::string>> regex;
     // grab selected files and optional alias=new name
-    std::map<std::string, std::map<std::string, std::string>> files;
+    std::map<std::string, std::vector<std::pair<std::string, std::string>>> files;
 
     bool empty() const {
         return all.empty() && regex.empty() && files.empty();
@@ -249,7 +251,7 @@ int main(int argc, char *argv[]) {
         throw std::runtime_error("exe.cpp was not found");
 
     // <existing file path, alias filename>
-    FilesMap files;
+    std::unordered_multimap<path, path> files;
 
     //
     for (auto &p : root.all) {
