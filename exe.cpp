@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <filesystem>
+//#include <iostream>
 #include <string>
 #include <Windows.h>
 
@@ -55,6 +57,24 @@ main()
     cmd.replace(cmd.find(argv[0]) - o, wcslen(argv[0]) + o + o, L"\"" PROG L"\"");
 
     LocalFree(argv);
+
+#ifdef ADD_PARENT_DIRECTORY_TO_PATH
+    std::filesystem::path p = PROG;
+    std::wstring path(32767, 0);
+    if (auto len = GetEnvironmentVariableW(L"Path", path.data(), path.size())) {
+        path.resize(len);
+        if (path.back() != L';') {
+            path += L";";
+        }
+        auto w = p.parent_path().wstring();
+        std::replace(w.begin(), w.end(), L'/', L'\\');
+        path += w;
+        if (!SetEnvironmentVariableW(L"Path", path.c_str())) {
+            MESSAGE(L"Cannot SetEnvironmentVariableW()!");
+            return 1;
+        }
+    }
+#endif
 
     STARTUPINFO si = { 0 };
     si.cb = sizeof(si);

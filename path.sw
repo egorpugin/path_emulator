@@ -66,7 +66,7 @@ void remove_old_files(auto &&files, const path &dir)
     // get new files
     Files dstfiles;
     for (auto &[k, v] : files)
-        dstfiles.insert(v);
+        dstfiles.insert(v.alias);
 
     // get existing links
     auto existing_files = enumerate_files(dir);
@@ -89,7 +89,7 @@ void create_links(auto &&files, const path &dstdir, const auto &compiler, const 
     std::vector<Future<void>> futures;
     for (auto &f : files)
     {
-        futures.push_back(e.push([&obj, &dstdir, &compiler, &exe_source_fn, p = f.first, name = f.second]
+        futures.push_back(e.push([&obj, &dstdir, &compiler, &exe_source_fn, p = f.first, name = f.second.alias, opts = f.second.opts]
         {
             auto o = dstdir / name;
             if (fs::exists(o))
@@ -110,6 +110,7 @@ void create_links(auto &&files, const path &dstdir, const auto &compiler, const 
                 "/Fo" + normalize_path(obj / name).string(),
                 "/Fe" + normalize_path(fs::current_path() / o).string(),
                 "/nologo",
+                "/std:c++latest",
                 "/EHsc",
                 // share pdb
                 "/FS",
@@ -127,6 +128,10 @@ void create_links(auto &&files, const path &dstdir, const auto &compiler, const 
                 "/DPROG=LR\"myfile(" + boost::replace_all_copy(normalize_path(p.parent_path()).string(), "/", "\\") + "\\" + normalize_path(p.filename()).string() + ")myfile\"",
                 "/DPROG_NAME=LR\"myfile(" + normalize_path(p.filename()).string() + ")myfile\"",
             };
+
+            if (opts.add_parent_directory_to_path) {
+                args.push_back("/DADD_PARENT_DIRECTORY_TO_PATH");
+            }
 
             for (auto &&i : compiler.idirs) {
                 args.push_back("-I"s + i.string());
@@ -221,6 +226,10 @@ cl_desc find_cl_exe() {
     return {};
 }
 
+struct options {
+    bool add_parent_directory_to_path{};
+};
+
 struct data {
     // grab all *.exe, *.bat, *.cmd
     std::vector<std::string> all;
@@ -228,9 +237,19 @@ struct data {
     std::vector<std::pair<std::string, std::string>> regex;
     // grab selected files and optional alias=new name
     std::map<std::string, std::vector<std::pair<std::string, std::string>>> files;
+    // same but with more options
+    struct file_alias {
+        std::string filename;
+        std::string alias;
+    };
+    struct file_aliases {
+        std::vector<file_alias> aliases;
+        options opts{};
+    };
+    std::map<std::string, file_aliases> files_with_options;
 
     bool empty() const {
-        return all.empty() && regex.empty() && files.empty();
+        return all.empty() && regex.empty() && files.empty() && files_with_options.empty();
     }
 } root
 // rename to data.h?
@@ -251,7 +270,11 @@ int main(int argc, char *argv[]) {
         throw std::runtime_error("exe.cpp was not found");
 
     // <existing file path, alias filename>
-    std::unordered_multimap<path, path> files;
+    struct alias {
+        path alias;
+        options opts{};
+    };
+    std::unordered_multimap<path, alias> files;
 
     //
     for (auto &p : root.all) {
@@ -289,6 +312,18 @@ int main(int argc, char *argv[]) {
                 files.emplace(p / fn, fn);
             else
                 files.emplace(p / fn, alias);
+        }
+    }
+    for (auto &&[pp, kv] : root.files_with_options) {
+        path p = pp;
+        for (auto &&[fn, alias] : kv.aliases) {
+            if (alias.empty()) {
+                auto it = files.emplace(p / fn, fn);
+                it->second.opts = kv.opts;
+            } else {
+                auto it = files.emplace(p / fn, alias);
+                it->second.opts = kv.opts;
+            }
         }
     }
 
