@@ -1,7 +1,6 @@
 *.lnk
 *.exe
 *.yml
-*.h
 *.bat
 
 .sw
